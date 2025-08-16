@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Simple To‑Do List</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --panel: #111827;
+      --text: #e5e7eb;
+      --muted: #9ca3af;
+      --accent: #22c55e;
+      --danger: #ef4444;
+      --border: #1f2937;
+      --shadow: 0 10px 30px rgba(0, 0, 0, .3);
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      margin: 0;
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+      background: linear-gradient(180deg, #0b1023 0%, #0f172a 60%);
+      color: var(--text);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+    .app {
+      width: 100%;
+      max-width: 720px;
+      background: rgba(17, 24, 39, .6);
+      backdrop-filter: blur(6px);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 20px 20px 14px;
+      box-shadow: var(--shadow);
+    }
+    .app h1 {
+      margin: 0 0 12px;
+      font-size: 24px;
+      letter-spacing: .3px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .app h1 .count {
+      font-size: 14px;
+      color: var(--muted);
+      font-weight: 500;
+      margin-left: auto;
+    }
+    form.new { display: flex; gap: 8px; margin: 8px 0 14px; }
+    .new input[type="text"] {
+      flex: 1;
+      padding: 12px 14px;
+      border-radius: 10px;
+      background: #0b1222;
+      border: 1px solid var(--border);
+      color: var(--text);
+      outline: none;
+    }
+    .new input[type="text"]::placeholder { color: #687082; }
+    .new button {
+      padding: 0 14px;
+      border-radius: 10px;
+      border: 1px solid #1f2937;
+      background: linear-gradient(180deg, #1c2436, #141a2a);
+      color: var(--text);
+      font-weight: 600;
+      cursor: pointer;
+      transition: .15s transform;
+    }
+    .new button:hover { transform: translateY(-1px); }
+
+    .actions { display: flex; gap: 8px; margin: 6px 0 12px; }
+    .actions button {
+      padding: 6px 10px;
+      font-size: 12px;
+      border-radius: 8px;
+      border: 1px solid #263145;
+      background: #0c1426;
+      color: var(--muted);
+      cursor: pointer;
+    }
+    .actions button.primary { color: #c7ffe0; border-color: #1e3a2f; background: #0b1a15; }
+
+    ul.list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 8px; }
+    li.item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 12px 12px;
+      border: 1px solid var(--border);
+      background: #0b1222;
+      border-radius: 12px;
+    }
+    .item input[type="checkbox"] { width: 18px; height: 18px; accent-color: var(--accent); }
+    .item label { flex: 1; user-select: none; }
+    .item.completed label { color: #7b8294; text-decoration: line-through; }
+    .item button.delete {
+      border: none;
+      background: transparent;
+      color: #ef8892;
+      padding: 6px 8px;
+      border-radius: 8px;
+      cursor: pointer;
+    }
+
+    .empty {
+      color: var(--muted);
+      text-align: center;
+      padding: 24px;
+      border: 1px dashed #263145;
+      border-radius: 12px;
+      background: #0b1222;
+    }
+
+    footer { margin-top: 14px; font-size: 12px; color: var(--muted); text-align: center; }
+    kbd { background: #111827; padding: 2px 6px; border-radius: 6px; border: 1px solid #263145; }
+    .sr-only { position: absolute; left: -9999px; }
+  </style>
+</head>
+<body>
+  <main class="app" role="application" aria-label="Simple To-Do List">
+    <h1>To‑Do List <span class="count" aria-live="polite">(0)</span></h1>
+
+    <form class="new" autocomplete="off">
+      <label for="todo-input" class="sr-only">Add a new task</label>
+      <input id="todo-input" type="text" placeholder="What needs to be done?" required maxlength="200" />
+      <button type="submit" title="Add task">Add</button>
+    </form>
+
+    <div class="actions">
+      <button type="button" class="filter" data-filter="all">All</button>
+      <button type="button" class="filter" data-filter="active">Active</button>
+      <button type="button" class="filter" data-filter="completed">Completed</button>
+      <button type="button" class="primary" id="clear-completed">Clear completed</button>
+    </div>
+
+    <ul class="list" id="list" aria-live="polite"></ul>
+    <div class="empty" id="empty" hidden>No tasks yet. Add some above. Tip: press <kbd>Enter</kbd> to add.</div>
+
+    <footer>Tasks are saved locally in this browser.</footer>
+  </main>
+
+  <script>
+    (function () {
+      'use strict';
+
+      const LS_KEY = 'todo.tasks.v1';
+
+      const els = {
+        form: document.querySelector('form.new'),
+        input: document.getElementById('todo-input'),
+        list: document.getElementById('list'),
+        empty: document.getElementById('empty'),
+        count: document.querySelector('.count'),
+        clearCompleted: document.getElementById('clear-completed'),
+        filters: Array.from(document.querySelectorAll('.filter')),
+      };
+
+      let state = {
+        tasks: [],
+        filter: 'all'
+      };
+
+      // Load initial state
+      try {
+        const saved = JSON.parse(localStorage.getItem(LS_KEY));
+        if (Array.isArray(saved)) state.tasks = saved;
+      } catch (_) {}
+
+      // Helpers
+      const save = () => localStorage.setItem(LS_KEY, JSON.stringify(state.tasks));
+
+      const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+
+      function addTask(text) {
+        const t = text.trim();
+        if (!t) return;
+        state.tasks.unshift({ id: uid(), text: t, completed: false });
+        save();
+        render();
+      }
+
+      function toggleTask(id, completed) {
+        const t = state.tasks.find(t => t.id === id);
+        if (!t) return;
+        t.completed = completed ?? !t.completed;
+        save();
+        render();
+      }
+
+      function deleteTask(id) {
+        state.tasks = state.tasks.filter(t => t.id !== id);
+        save();
+        render();
+      }
+
+      function clearCompleted() {
+        state.tasks = state.tasks.filter(t => !t.completed);
+        save();
+        render();
+      }
+
+      function setFilter(next) {
+        state.filter = next;
+        render();
+      }
+
+      function filtered(tasks) {
+        if (state.filter === 'active') return tasks.filter(t => !t.completed);
+        if (state.filter === 'completed') return tasks.filter(t => t.completed);
+        return tasks;
+      }
+
+      function render() {
+        // counts and filters
+        const activeCount = state.tasks.filter(t => !t.completed).length;
+        els.count.textContent = `(${activeCount} active)`;
+
+        els.filters.forEach(btn => {
+          if (btn.dataset.filter === state.filter) {
+            btn.style.color = '#e5fbea';
+            btn.style.borderColor = '#1e3a2f';
+            btn.style.background = '#0b1a15';
+          } else {
+            btn.removeAttribute('style');
+          }
+        });
+
+        const items = filtered(state.tasks);
+        els.list.innerHTML = '';
+
+        if (items.length === 0) {
+          els.empty.hidden = false;
+          return;
+        }
+
+        els.empty.hidden = true;
+
+        const frag = document.createDocumentFragment();
+
+        for (const task of items) {
+          const li = document.createElement('li');
+          li.className = 'item' + (task.completed ? ' completed' : '');
+          li.dataset.id = task.id;
+
+          const checkbox = document.createElement('input');
+          checkbox.type = 'checkbox';
+          checkbox.checked = task.completed;
+          checkbox.setAttribute('aria-label', `Toggle ${task.text}`);
+
+          const label = document.createElement('label');
+          label.textContent = task.text;
+
+          const del = document.createElement('button');
+          del.className = 'delete';
+          del.title = 'Delete task';
+          del.setAttribute('aria-label', `Delete ${task.text}`);
+          del.textContent = 'Delete';
+
+          li.append(checkbox, label, del);
+          frag.appendChild(li);
+        }
+
+        els.list.appendChild(frag);
+      }
+
+      // Events
+      els.form.addEventListener('submit', (e) => {
+        e.preventDefault();
+        addTask(els.input.value);
+        els.input.value = '';
+        els.input.focus();
+      });
+
+      els.list.addEventListener('click', (e) => {
+        const li = e.target.closest('li.item');
+        if (!li) return;
+        const id = li.dataset.id;
+
+        if (e.target.matches('input[type="checkbox"]')) {
+          toggleTask(id, e.target.checked);
+        } else if (e.target.matches('button.delete')) {
+          deleteTask(id);
+        }
+      });
+
+      els.clearCompleted.addEventListener('click', () => clearCompleted());
+
+      els.filters.forEach(btn =>
+        btn.addEventListener('click', () => setFilter(btn.dataset.filter))
+      );
+
+      // Initial render
+      render();
+    })();
+  </script>
+
+  <noscript>Please enable JavaScript to use this to‑do app.</noscript>
+</body>
+</html>
