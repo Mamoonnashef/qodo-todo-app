@@ -76,6 +76,28 @@
       outline: none;
       cursor: pointer;
     }
+    .new input[type="datetime-local"] {
+      padding: 12px 12px;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      background: #0b1222;
+      color: var(--text);
+      outline: none;
+      min-width: 200px;
+    }
+    .item time.due {
+      font-size: 12px;
+      color: var(--muted);
+      margin-left: 6px;
+      font-variant-numeric: tabular-nums;
+    }
+    .item time.due.overdue {
+      color: #fecaca;
+      background: rgba(239, 68, 68, .1);
+      padding: 2px 6px;
+      border-radius: 6px;
+      border: 1px solid rgba(239,68,68,.35);
+    }
     .new button {
       padding: 0 14px;
       border-radius: 10px;
@@ -209,6 +231,8 @@
     <form class="new" autocomplete="off">
       <label for="todo-input" class="sr-only">Add a new task</label>
       <input id="todo-input" type="text" placeholder="What needs to be done?" required maxlength="200" />
+      <label for="deadline-input" class="sr-only">Deadline</label>
+      <input id="deadline-input" type="datetime-local" aria-label="Deadline" />
       <label for="priority-input" class="sr-only">Priority</label>
       <select id="priority-input" class="priority-input" aria-label="Priority">
         <option value="3">High</option>
@@ -251,6 +275,7 @@
       const els = {
         form: document.querySelector('form.new'),
         input: document.getElementById('todo-input'),
+        deadlineInput: document.getElementById('deadline-input'),
         priorityInput: document.getElementById('priority-input'),
         list: document.getElementById('list'),
         empty: document.getElementById('empty'),
@@ -280,6 +305,7 @@
         text: t.text || '',
         completed: !!t.completed,
         priority: toPri(t.priority),
+        dueAt: t.dueAt != null ? (Number(t.dueAt) || null) : null,
         createdAt: t.createdAt || Date.now(),
         updatedAt: t.updatedAt || Date.now(),
       }));
@@ -304,6 +330,18 @@
         return n === 3 ? 'High' : n === 2 ? 'Medium' : 'Low';
       }
 
+      function parseDue(s) {
+        if (!s) return null;
+        const t = Date.parse(s);
+        return Number.isFinite(t) ? t : null;
+      }
+      function formatDue(ts) {
+        try {
+          const d = new Date(ts);
+          return d.toLocaleString([], { hour12: false, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+        } catch { return String(ts); }
+      }
+
       function record(message) {
         history.unshift({ time: Date.now(), message });
         // cap history length to avoid bloat
@@ -312,14 +350,16 @@
         renderHistory();
       }
 
-      function addTask(text, priority) {
+      function addTask(text, priority, dueAt) {
         const t = text.trim();
         if (!t) return;
         const pri = toPri(priority);
         const now = Date.now();
-        state.tasks.unshift({ id: uid(), text: t, completed: false, priority: pri, createdAt: now, updatedAt: now });
+        const due = typeof dueAt === 'number' && Number.isFinite(dueAt) ? dueAt : null;
+        state.tasks.unshift({ id: uid(), text: t, completed: false, priority: pri, dueAt: due, createdAt: now, updatedAt: now });
         save();
-        record(`Added \"${t}\" [${priLabel(pri)}]`);
+        const dueStr = due ? `, due ${formatDue(due)}` : '';
+        record(`Added \"${t}\" [${priLabel(pri)}]${dueStr}`);
         render();
       }
 
@@ -442,9 +482,20 @@
           del.setAttribute('aria-label', `Delete ${task.text}`);
           del.textContent = 'Delete';
 
+          const due = document.createElement('time');
+          if (task.dueAt) {
+            due.className = 'due' + ((task.dueAt < Date.now() && !task.completed) ? ' overdue' : '');
+            due.dateTime = new Date(task.dueAt).toISOString();
+            due.textContent = 'Due ' + formatDue(task.dueAt);
+          }
+
           sel.addEventListener('change', () => updatePriority(task.id, Number(sel.value)));
 
-          li.append(checkbox, pill, label, sel, del);
+          if (task.dueAt) {
+            li.append(checkbox, pill, label, due, sel, del);
+          } else {
+            li.append(checkbox, pill, label, sel, del);
+          }
           frag.appendChild(li);
         }
 
@@ -483,9 +534,11 @@
       // Events
       els.form.addEventListener('submit', (e) => {
         e.preventDefault();
-        addTask(els.input.value, Number(els.priorityInput.value));
+        const dueTs = parseDue(els.deadlineInput.value);
+        addTask(els.input.value, Number(els.priorityInput.value), dueTs);
         els.input.value = '';
         els.priorityInput.value = '2'; // reset to Medium
+        els.deadlineInput.value = '';
         els.input.focus();
       });
 
