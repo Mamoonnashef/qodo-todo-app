@@ -14,6 +14,10 @@
       --danger: #ef4444;
       --border: #1f2937;
       --shadow: 0 10px 30px rgba(0, 0, 0, .3);
+
+      --pri-low: #60a5fa;      /* blue-400 */
+      --pri-med: #f59e0b;      /* amber-500 */
+      --pri-high: #ef4444;     /* red-500 */
     }
     * { box-sizing: border-box; }
     html, body { height: 100%; }
@@ -62,6 +66,16 @@
       outline: none;
     }
     .new input[type="text"]::placeholder { color: #687082; }
+    .new select.priority-input {
+      padding: 12px 12px;
+      border-radius: 10px;
+      border: 1px solid #1f2937;
+      background: linear-gradient(180deg, #1c2436, #141a2a);
+      color: var(--text);
+      min-width: 120px;
+      outline: none;
+      cursor: pointer;
+    }
     .new button {
       padding: 0 14px;
       border-radius: 10px;
@@ -107,6 +121,26 @@
       border-radius: 8px;
       cursor: pointer;
     }
+    .item select.priority {
+      padding: 6px 8px;
+      border-radius: 8px;
+      border: 1px solid #263145;
+      background: #0c1426;
+      color: var(--text);
+      cursor: pointer;
+      font-size: 12px;
+    }
+    .pill {
+      font-size: 11px;
+      line-height: 1;
+      padding: 4px 8px;
+      border-radius: 999px;
+      border: 1px solid transparent;
+      user-select: none;
+    }
+    .pill.low    { background: rgba(96, 165, 250, .15);  color: #bfdbfe; border-color: rgba(96,165,250,.3); }
+    .pill.medium { background: rgba(245, 158, 11, .15); color: #fde68a; border-color: rgba(245,158,11,.35); }
+    .pill.high   { background: rgba(239, 68, 68, .15);  color: #fecaca; border-color: rgba(239,68,68,.35); }
 
     .empty {
       color: var(--muted);
@@ -115,6 +149,52 @@
       border: 1px dashed #263145;
       border-radius: 12px;
       background: #0b1222;
+    }
+
+    section.history {
+      margin-top: 16px;
+      border-top: 1px solid var(--border);
+      padding-top: 10px;
+    }
+    details.history-toggle summary {
+      cursor: pointer;
+      color: #c0c7d4;
+      outline: none;
+      list-style: none;
+    }
+    details.history-toggle summary::-webkit-details-marker { display: none; }
+    details.history-toggle summary::before {
+      content: '▸';
+      display: inline-block;
+      transform: rotate(0deg);
+      margin-right: 6px;
+      transition: transform .15s;
+    }
+    details.history-toggle[open] summary::before { transform: rotate(90deg); }
+
+    ul.history-list { list-style: none; padding: 0; margin: 8px 0 0; display: flex; flex-direction: column; gap: 6px; }
+    .history-item {
+      font-size: 12px;
+      color: #c9d1e0;
+      display: flex;
+      gap: 8px;
+      align-items: baseline;
+      border: 1px solid var(--border);
+      padding: 8px 10px;
+      background: #0b1222;
+      border-radius: 8px;
+    }
+    .history-item time { color: var(--muted); font-variant-numeric: tabular-nums; }
+
+    .history-actions { display: flex; gap: 8px; margin-top: 8px; }
+    #clear-history {
+      padding: 6px 10px;
+      font-size: 12px;
+      border-radius: 8px;
+      border: 1px solid #402436;
+      background: #26101a;
+      color: #ffc9d4;
+      cursor: pointer;
     }
 
     footer { margin-top: 14px; font-size: 12px; color: var(--muted); text-align: center; }
@@ -129,6 +209,12 @@
     <form class="new" autocomplete="off">
       <label for="todo-input" class="sr-only">Add a new task</label>
       <input id="todo-input" type="text" placeholder="What needs to be done?" required maxlength="200" />
+      <label for="priority-input" class="sr-only">Priority</label>
+      <select id="priority-input" class="priority-input" aria-label="Priority">
+        <option value="3">High</option>
+        <option value="2" selected>Medium</option>
+        <option value="1">Low</option>
+      </select>
       <button type="submit" title="Add task">Add</button>
     </form>
 
@@ -142,7 +228,17 @@
     <ul class="list" id="list" aria-live="polite"></ul>
     <div class="empty" id="empty" hidden>No tasks yet. Add some above. Tip: press <kbd>Enter</kbd> to add.</div>
 
-    <footer>Tasks are saved locally in this browser.</footer>
+    <section class="history" aria-label="History">
+      <details class="history-toggle" open>
+        <summary>History</summary>
+        <div class="history-actions">
+          <button type="button" id="clear-history" title="Clear history">Clear history</button>
+        </div>
+        <ul class="history-list" id="history-list" aria-live="polite"></ul>
+      </details>
+    </section>
+
+    <footer>Tasks and history are saved locally in this browser.</footer>
   </main>
 
   <script>
@@ -150,15 +246,19 @@
       'use strict';
 
       const LS_KEY = 'todo.tasks.v1';
+      const LS_HISTORY_KEY = 'todo.history.v1';
 
       const els = {
         form: document.querySelector('form.new'),
         input: document.getElementById('todo-input'),
+        priorityInput: document.getElementById('priority-input'),
         list: document.getElementById('list'),
         empty: document.getElementById('empty'),
         count: document.querySelector('.count'),
         clearCompleted: document.getElementById('clear-completed'),
         filters: Array.from(document.querySelectorAll('.filter')),
+        historyList: document.getElementById('history-list'),
+        clearHistory: document.getElementById('clear-history'),
       };
 
       let state = {
@@ -166,22 +266,60 @@
         filter: 'all'
       };
 
+      let history = [];
+
       // Load initial state
       try {
         const saved = JSON.parse(localStorage.getItem(LS_KEY));
         if (Array.isArray(saved)) state.tasks = saved;
       } catch (_) {}
 
+      // add default fields for older saves
+      state.tasks = state.tasks.map(t => ({
+        id: t.id || uid(),
+        text: t.text || '',
+        completed: !!t.completed,
+        priority: toPri(t.priority),
+        createdAt: t.createdAt || Date.now(),
+        updatedAt: t.updatedAt || Date.now(),
+      }));
+
+      try {
+        const savedHistory = JSON.parse(localStorage.getItem(LS_HISTORY_KEY));
+        if (Array.isArray(savedHistory)) history = savedHistory;
+      } catch (_) {}
+
       // Helpers
       const save = () => localStorage.setItem(LS_KEY, JSON.stringify(state.tasks));
+      const saveHistory = () => localStorage.setItem(LS_HISTORY_KEY, JSON.stringify(history));
 
       const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+      function toPri(p) {
+        const n = Number(p);
+        if (n === 1 || n === 2 || n === 3) return n;
+        return 2; // default medium
+      }
+      function priLabel(p) {
+        const n = toPri(p);
+        return n === 3 ? 'High' : n === 2 ? 'Medium' : 'Low';
+      }
 
-      function addTask(text) {
+      function record(message) {
+        history.unshift({ time: Date.now(), message });
+        // cap history length to avoid bloat
+        if (history.length > 500) history.length = 500;
+        saveHistory();
+        renderHistory();
+      }
+
+      function addTask(text, priority) {
         const t = text.trim();
         if (!t) return;
-        state.tasks.unshift({ id: uid(), text: t, completed: false });
+        const pri = toPri(priority);
+        const now = Date.now();
+        state.tasks.unshift({ id: uid(), text: t, completed: false, priority: pri, createdAt: now, updatedAt: now });
         save();
+        record(`Added \"${t}\" [${priLabel(pri)}]`);
         render();
       }
 
@@ -189,24 +327,44 @@
         const t = state.tasks.find(t => t.id === id);
         if (!t) return;
         t.completed = completed ?? !t.completed;
+        t.updatedAt = Date.now();
         save();
+        record(`${t.completed ? 'Completed' : 'Reopened'} \"${t.text}\"`);
         render();
       }
 
       function deleteTask(id) {
+        const t = state.tasks.find(t => t.id === id);
+        const text = t ? t.text : '';
         state.tasks = state.tasks.filter(t => t.id !== id);
         save();
+        record(`Deleted \"${text}\"`);
         render();
       }
 
       function clearCompleted() {
+        const count = state.tasks.filter(t => t.completed).length;
+        if (count === 0) return;
         state.tasks = state.tasks.filter(t => !t.completed);
         save();
+        record(`Cleared ${count} completed task${count === 1 ? '' : 's'}`);
         render();
       }
 
       function setFilter(next) {
         state.filter = next;
+        render();
+      }
+
+      function updatePriority(id, nextPri) {
+        const t = state.tasks.find(t => t.id === id);
+        if (!t) return;
+        const prev = priLabel(t.priority);
+        t.priority = toPri(nextPri);
+        t.updatedAt = Date.now();
+        save();
+        const next = priLabel(t.priority);
+        if (prev !== next) record(`Priority for \"${t.text}\" changed: ${prev} → ${next}`);
         render();
       }
 
@@ -253,8 +411,30 @@
           checkbox.checked = task.completed;
           checkbox.setAttribute('aria-label', `Toggle ${task.text}`);
 
+          const pill = document.createElement('span');
+          const lbl = priLabel(task.priority).toLowerCase();
+          pill.className = `pill ${lbl}`;
+          pill.textContent = priLabel(task.priority);
+          pill.title = `Priority: ${priLabel(task.priority)}`;
+
           const label = document.createElement('label');
           label.textContent = task.text;
+
+          const sel = document.createElement('select');
+          sel.className = 'priority';
+          sel.setAttribute('aria-label', `Priority for ${task.text}`);
+          const options = [
+            { v: 3, t: 'High' },
+            { v: 2, t: 'Medium' },
+            { v: 1, t: 'Low' },
+          ];
+          for (const o of options) {
+            const op = document.createElement('option');
+            op.value = String(o.v);
+            op.textContent = o.t;
+            if (o.v === toPri(task.priority)) op.selected = true;
+            sel.appendChild(op);
+          }
 
           const del = document.createElement('button');
           del.className = 'delete';
@@ -262,18 +442,50 @@
           del.setAttribute('aria-label', `Delete ${task.text}`);
           del.textContent = 'Delete';
 
-          li.append(checkbox, label, del);
+          sel.addEventListener('change', () => updatePriority(task.id, Number(sel.value)));
+
+          li.append(checkbox, pill, label, sel, del);
           frag.appendChild(li);
         }
 
         els.list.appendChild(frag);
+
+        // also keep history visible on each render (e.g., after clear completed)
+        renderHistory();
+      }
+
+      function renderHistory() {
+        if (!els.historyList) return;
+        els.historyList.innerHTML = '';
+        if (history.length === 0) return;
+        const frag = document.createDocumentFragment();
+        for (const h of history) {
+          const li = document.createElement('li');
+          li.className = 'history-item';
+          const time = document.createElement('time');
+          time.dateTime = new Date(h.time).toISOString();
+          time.textContent = formatTime(h.time);
+          const msg = document.createElement('span');
+          msg.textContent = h.message;
+          li.append(time, msg);
+          frag.appendChild(li);
+        }
+        els.historyList.appendChild(frag);
+      }
+
+      function formatTime(ts) {
+        try {
+          const d = new Date(ts);
+          return d.toLocaleString([], { hour12: false, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        } catch { return String(ts); }
       }
 
       // Events
       els.form.addEventListener('submit', (e) => {
         e.preventDefault();
-        addTask(els.input.value);
+        addTask(els.input.value, Number(els.priorityInput.value));
         els.input.value = '';
+        els.priorityInput.value = '2'; // reset to Medium
         els.input.focus();
       });
 
@@ -294,6 +506,15 @@
       els.filters.forEach(btn =>
         btn.addEventListener('click', () => setFilter(btn.dataset.filter))
       );
+
+      if (els.clearHistory) {
+        els.clearHistory.addEventListener('click', () => {
+          if (history.length === 0) return;
+          history = [];
+          saveHistory();
+          renderHistory();
+        });
+      }
 
       // Initial render
       render();
